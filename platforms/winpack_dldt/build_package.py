@@ -163,7 +163,7 @@ class BuilderDLDT:
         self.config = config
 
         cpath = self.config.dldt_config
-        log.info('DLDT build configration: %s', cpath)
+        log.info('DLDT build configuration: %s', cpath)
         if not os.path.exists(cpath):
             cpath = os.path.join(SCRIPT_DIR, cpath)
             if not os.path.exists(cpath):
@@ -388,10 +388,9 @@ class Builder:
         if self.config.dldt_release:
             cmake_vars['INF_ENGINE_RELEASE'] = str(self.config.dldt_release)
 
-        cmake_vars['INF_ENGINE_LIB_DIRS:PATH'] = str(builderDLDT.sysrootdir / 'deployment_tools/inference_engine/lib/intel64')
-        assert os.path.exists(cmake_vars['INF_ENGINE_LIB_DIRS:PATH']), cmake_vars['INF_ENGINE_LIB_DIRS:PATH']
-        cmake_vars['INF_ENGINE_INCLUDE_DIRS:PATH'] = str(builderDLDT.sysrootdir / 'deployment_tools/inference_engine/include')
-        assert os.path.exists(cmake_vars['INF_ENGINE_INCLUDE_DIRS:PATH']), cmake_vars['INF_ENGINE_INCLUDE_DIRS:PATH']
+        InferenceEngine_DIR = str(builderDLDT.sysrootdir / 'deployment_tools' / 'inference_engine' / 'cmake')
+        assert os.path.exists(InferenceEngine_DIR), InferenceEngine_DIR
+        cmake_vars['InferenceEngine_DIR:PATH'] = InferenceEngine_DIR
 
         ngraph_DIR = str(builderDLDT.sysrootdir / 'ngraph/cmake')
         if not os.path.exists(ngraph_DIR):
@@ -471,7 +470,8 @@ class Builder:
 def main():
 
     dldt_src_url = 'https://github.com/openvinotoolkit/openvino'
-    dldt_src_commit = '2021.4'
+    dldt_src_commit = '2021.4.2'
+    dldt_config = None
     dldt_release = None
 
     build_cache_dir_default = os.environ.get('BUILD_CACHE_DIR', '.build_cache')
@@ -505,7 +505,7 @@ def main():
     parser.add_argument('--dldt_reference_dir', help='DLDT reference git repository (optional)')
     parser.add_argument('--dldt_src_dir', help='DLDT custom source repository (skip git checkout and patching, use for TESTING only)')
 
-    parser.add_argument('--dldt_config', help='Specify DLDT build configuration (defaults to evaluate from DLDT commit/branch)')
+    parser.add_argument('--dldt_config', default=dldt_config, help='Specify DLDT build configuration (defaults to evaluate from DLDT commit/branch)')
 
     parser.add_argument('--override_patch_hashsum', default='', help='(script debug mode)')
 
@@ -574,5 +574,5 @@ if __name__ == "__main__":
     try:
         main()
     except:
-        log.info('FATAL: Error occured. To investigate problem try to change logging level using LOGLEVEL=DEBUG environment variable.')
+        log.info('FATAL: Error occurred. To investigate problem try to change logging level using LOGLEVEL=DEBUG environment variable.')
         raise

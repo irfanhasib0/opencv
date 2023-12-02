@@ -40,7 +40,7 @@ struct NotImplemented {
  * which can be utilized when serializing a custom type.
  *
  * Example of usage:
- * @snippet modules/gapi/samples/api_ref_snippets.cpp S11N usage
+ * @snippet samples/cpp/tutorial_code/gapi/doc_snippets/api_ref_snippets.cpp S11N usage
  *
  */
 template<typename T>
@@ -52,7 +52,7 @@ struct S11N: public NotImplemented {
      * properly overload the function to use it.
      */
     static void serialize(IOStream &, const T &) {
-        GAPI_Assert(false && "No serialization routine is provided!");
+        GAPI_Error("No serialization routine is provided!");
     }
     /**
      * @brief This function allows user to deserialize their custom type.
@@ -61,7 +61,7 @@ struct S11N: public NotImplemented {
      * properly overload the function to use it.
      */
     static T deserialize(IIStream &) {
-        GAPI_Assert(false && "No deserialization routine is provided!");
+        GAPI_Error("No deserialization routine is provided!");
     }
 };
 

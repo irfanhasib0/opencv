@@ -278,6 +278,21 @@ std::shared_ptr<CvWindow> icvFindWindowByName(const char* name)
     return icvFindWindowByName(std::string(name));
 }
 
+// Mutex must be locked
+static
+std::shared_ptr<CvWindow> icvFindWindowByHandle(HWND hwnd)
+{
+    auto& g_windows = getWindowsList();
+    for (auto it = g_windows.begin(); it != g_windows.end(); ++it)
+    {
+        auto window = *it;
+        if (!window)
+            continue;
+        if (window->hwnd == hwnd || window->frame == hwnd)
+            return window;
+    }
+    return std::shared_ptr<CvWindow>();
+}
 
 
 static LRESULT CALLBACK HighGUIProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -2052,28 +2067,23 @@ static LRESULT CALLBACK HGToolbarProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
     case WM_NCCALCSIZE:
         {
             LRESULT ret = CallWindowProc(window.toolbar.toolBarProc, hwnd, uMsg, wParam, lParam);
-            int rows = (int)SendMessage(hwnd, TB_GETROWS, 0, 0);
 
-            if (window.toolbar.rows != rows)
+            auto& trakbars = window.toolbar.trackbars;
+
+            for (auto it = trakbars.begin(); it != trakbars.end(); ++it)
             {
-                SendMessage(window.toolbar.toolbar, TB_BUTTONCOUNT, 0, 0);
-                auto& trakbars = window.toolbar.trackbars;
-
-                for (auto it = trakbars.begin(); it != trakbars.end(); ++it)
-                {
-                    auto trackbar = *it;
-                    CV_Assert(trackbar);
-                    RECT rect = { 0 };
-                    SendMessage(window.toolbar.toolbar, TB_GETITEMRECT,
-                               (WPARAM)trackbar->id, (LPARAM)&rect);
-                    MoveWindow(trackbar->hwnd, rect.left + HG_BUDDY_WIDTH, rect.top,
-                               rect.right - rect.left - HG_BUDDY_WIDTH,
-                               rect.bottom - rect.top, FALSE);
-                    MoveWindow(trackbar->buddy, rect.left, rect.top,
-                               HG_BUDDY_WIDTH, rect.bottom - rect.top, FALSE);
-                }
-                window.toolbar.rows = rows;
+                auto trackbar = *it;
+                CV_Assert(trackbar);
+                RECT rect = { 0 };
+                SendMessage(window.toolbar.toolbar, TB_GETITEMRECT,
+                           (WPARAM)trackbar->id, (LPARAM)&rect);
+                MoveWindow(trackbar->hwnd, rect.left + HG_BUDDY_WIDTH, rect.top,
+                           rect.right - rect.left - HG_BUDDY_WIDTH,
+                           rect.bottom - rect.top, FALSE);
+                MoveWindow(trackbar->buddy, rect.left, rect.top,
+                           HG_BUDDY_WIDTH, rect.bottom - rect.top, FALSE);
             }
+            window.toolbar.rows = static_cast<int>(SendMessage(hwnd, TB_GETROWS, 0, 0));
             return ret;
         }
     }
@@ -2117,6 +2127,7 @@ cvDestroyAllWindows(void)
 
 static void showSaveDialog(CvWindow& window)
 {
+#ifdef HAVE_OPENCV_IMGCODECS
     if (!window.image)
         return;
 
@@ -2140,7 +2151,7 @@ static void showSaveDialog(CvWindow& window)
 #endif
     ofn.hwndOwner = window.hwnd;
     ofn.lpstrFilter =
-#ifdef HAVE_PNG
+#if defined(HAVE_PNG) || defined(HAVE_SPNG)
                       "Portable Network Graphics files (*.png)\0*.png\0"
 #endif
                       "Windows bitmap (*.bmp;*.dib)\0*.bmp;*.dib\0"
@@ -2166,7 +2177,7 @@ static void showSaveDialog(CvWindow& window)
     ofn.lpstrFile = szFileName;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOREADONLYRETURN | OFN_NOCHANGEDIR;
-#ifdef HAVE_PNG
+#if defined(HAVE_PNG) || defined(HAVE_SPNG)
     ofn.lpstrDefExt = "png";
 #else
     ofn.lpstrDefExt = "bmp";
@@ -2178,6 +2189,11 @@ static void showSaveDialog(CvWindow& window)
         cv::flip(cv::Mat(sz.cy, sz.cx, CV_8UC(channels), data, (sz.cx * channels + 3) & -4), tmp, 0);
         cv::imwrite(szFileName, tmp);
     }
+#else
+    CV_UNUSED(window);
+    CV_LOG_WARNING("Save dialog requires enabled 'imgcodecs' module.");
+    return;
+#endif
 }
 
 /*
@@ -2187,22 +2203,15 @@ static void showSaveDialog(CvWindow& window)
  */
 static bool handleMessage(MSG& message, int& keyCode)
 {
-    // whether we have to call translate and dispatch yet
-    // otherwise the message was handled specifically
-    bool is_processed = false;
-
-    AutoLock lock(getWindowMutex());
-    auto& g_windows = getWindowsList();
-    for (auto it = g_windows.begin(); it != g_windows.end() && !is_processed; ++it)
+    std::shared_ptr<CvWindow> window_;
     {
-        auto window_ = *it;
-        if (!window_)
-            continue;
+        AutoLock lock(getWindowMutex());
+        window_ = icvFindWindowByHandle(message.hwnd);
+    }
+    if (window_)
+    {
         CvWindow& window = *window_;
-        if (!(window.hwnd == message.hwnd || window.frame == message.hwnd))
-            continue;
 
-        is_processed = true;
         switch (message.message)
         {
             case WM_DESTROY:
@@ -2215,7 +2224,6 @@ static bool handleMessage(MSG& message, int& keyCode)
             case WM_SYSKEYDOWN:
                 if (message.wParam == VK_F10)
                 {
-                    is_processed = true;
                     keyCode = (int)(message.wParam << 16);
                     return true;
                 }
@@ -2245,7 +2253,6 @@ static bool handleMessage(MSG& message, int& keyCode)
                     message.wParam == VK_PRIOR  || message.wParam == VK_NEXT)
                 {
                     DispatchMessage(&message);
-                    is_processed = true;
                     keyCode = (int)(message.wParam << 16);
                     return true;
                 }
@@ -2254,18 +2261,16 @@ static bool handleMessage(MSG& message, int& keyCode)
 
             default:
                 DispatchMessage(&message);
-                is_processed = true;
                 break;
         }
     }
-
-    if (!is_processed)
+    else
     {
         TranslateMessage(&message);
         DispatchMessage(&message);
     }
 
-    return false; // no value to return, keep processing
+    return false; // no keyCode to return, keep processing
 }
 
 /*
@@ -2326,12 +2331,6 @@ std::shared_ptr<CvTrackbar> icvFindTrackbarByName(CvWindow& window, const std::s
             return trackbar;
     }
     return std::shared_ptr<CvTrackbar>();
-}
-static inline
-std::shared_ptr<CvTrackbar> icvFindTrackbarByName(const std::shared_ptr<CvWindow>& window, const std::string& name)
-{
-    CV_Assert(window);
-    return icvFindTrackbarByName(window, name);
 }
 
 static
@@ -2421,7 +2420,7 @@ std::shared_ptr<CvTrackbar> createTrackbar_(CvWindow& window, const std::string&
     /* Retrieve current buttons count */
     int bcount = (int)SendMessage(window.toolbar.toolbar, TB_BUTTONCOUNT, 0, 0);
 
-    if (bcount > 1)
+    if (bcount > 0)
     {
         /* If this is not the first button then we need to
         separate it from the previous one */
@@ -2465,7 +2464,7 @@ std::shared_ptr<CvTrackbar> createTrackbar_(CvWindow& window, const std::string&
     tbis.dwMask = TBIF_SIZE;
 
     RECT rect = { 0 };
-    GetClientRect(window.hwnd, &rect);
+    GetClientRect(window.toolbar.toolbar, &rect);
     tbis.cx = (unsigned short)(rect.right - rect.left);
 
     SendMessage(window.toolbar.toolbar, TB_SETBUTTONINFO,
@@ -2477,7 +2476,7 @@ std::shared_ptr<CvTrackbar> createTrackbar_(CvWindow& window, const std::string&
 
     /* Create a slider */
     auto trackbar = std::make_shared<CvTrackbar>(window, trackbar_name);
-    trackbar->id = bcount;
+    trackbar->id = tbs.idCommand;
     window.toolbar.trackbars.push_back(trackbar);
 
     auto slider_name = cv::format("Trackbar%p", trackbar.get());
@@ -2576,7 +2575,7 @@ CV_IMPL int cvGetTrackbarPos(const char* trackbar_name, const char* window_name)
     if (!window)
         CV_Error_(Error::StsNullPtr, ("NULL window: '%s'", window_name));
 
-    auto trackbar = icvFindTrackbarByName(window, trackbar_name);
+    auto trackbar = icvFindTrackbarByName(*window, trackbar_name);
     if (!trackbar)
         CV_Error_(Error::StsNullPtr, ("NULL trackbar: '%s'", trackbar_name));
 
@@ -2597,7 +2596,7 @@ CV_IMPL void cvSetTrackbarPos(const char* trackbar_name, const char* window_name
     if (!window)
         CV_Error_(Error::StsNullPtr, ("NULL window: '%s'", window_name));
 
-    auto trackbar = icvFindTrackbarByName(window, trackbar_name);
+    auto trackbar = icvFindTrackbarByName(*window, trackbar_name);
     if (!trackbar)
         CV_Error_(Error::StsNullPtr, ("NULL trackbar: '%s'", trackbar_name));
 
@@ -2629,7 +2628,7 @@ CV_IMPL void cvSetTrackbarMax(const char* trackbar_name, const char* window_name
     if (!window)
         CV_Error_(Error::StsNullPtr, ("NULL window: '%s'", window_name));
 
-    auto trackbar = icvFindTrackbarByName(window, trackbar_name);
+    auto trackbar = icvFindTrackbarByName(*window, trackbar_name);
     if (!trackbar)
         CV_Error_(Error::StsNullPtr, ("NULL trackbar: '%s'", trackbar_name));
 
@@ -2658,7 +2657,7 @@ CV_IMPL void cvSetTrackbarMin(const char* trackbar_name, const char* window_name
     if (!window)
         CV_Error_(Error::StsNullPtr, ("NULL window: '%s'", window_name));
 
-    auto trackbar = icvFindTrackbarByName(window, trackbar_name);
+    auto trackbar = icvFindTrackbarByName(*window, trackbar_name);
     if (!trackbar)
         CV_Error_(Error::StsNullPtr, ("NULL trackbar: '%s'", trackbar_name));
 
@@ -2980,7 +2979,7 @@ public:
         CvTrackbar& trackbar = *trackbar_ptr;
         CV_CheckLE(range.start, range.end, "Invalid trackbar range");
         trackbar.minval = range.start;
-        trackbar.maxval = range.start;
+        trackbar.maxval = range.end;
         SendMessage(trackbar.hwnd, TBM_SETRANGEMIN, (WPARAM)TRUE, (LPARAM)trackbar.minval);
         SendMessage(trackbar.hwnd, TBM_SETRANGEMAX, (WPARAM)TRUE, (LPARAM)trackbar.maxval);
     }

@@ -5,8 +5,9 @@ namespace cv
 {
 struct GAPI_EXPORTS_W_SIMPLE GCompileArg
 {
-    GAPI_WRAP GCompileArg(gapi::GKernelPackage pkg);
-    GAPI_WRAP GCompileArg(gapi::GNetPackage pkg);
+    GAPI_WRAP GCompileArg(GKernelPackage arg);
+    GAPI_WRAP GCompileArg(gapi::GNetPackage arg);
+    GAPI_WRAP GCompileArg(gapi::streaming::queue_capacity arg);
 };
 
 class GAPI_EXPORTS_W_SIMPLE GInferInputs
@@ -78,5 +79,6 @@ namespace streaming
 namespace detail
 {
     gapi::GNetParam GAPI_EXPORTS_W strip(gapi::ie::PyParams params);
+    gapi::GNetParam GAPI_EXPORTS_W strip(gapi::onnx::PyParams params);
 } // namespace detail
 } // namespace cv
